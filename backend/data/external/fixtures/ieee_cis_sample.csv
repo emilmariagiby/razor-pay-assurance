@@ -1,0 +1,6 @@
+TransactionID,isFraud,TransactionDT,TransactionAmt,ProductCD,card1,card2,card3,card4,card5,card6,addr1,addr2,dist1,dist2,P_emaildomain,R_emaildomain
+2987000,0,86400,68.5,W,13926,NaN,150,discover,142,credit,315,87,19,NaN,NaN,NaN
+2987001,0,86401,29.0,W,2755,404,150,mastercard,102,credit,325,87,NaN,NaN,gmail.com,NaN
+2987002,0,86469,59.0,W,4663,490,150,visa,166,debit,330,87,287,NaN,outlook.com,NaN
+2987003,0,86499,50.0,W,18132,567,150,mastercard,117,debit,476,87,NaN,NaN,yahoo.com,NaN
+2987004,1,86506,50.0,H,4497,514,150,mastercard,102,credit,420,87,NaN,NaN,gmail.com,NaN
