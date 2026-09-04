@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.cases.assurance import AssuranceCase, RecommendedAction
+from app.cases.assurance import AssuranceCase, RecommendedAction, ViolationType
+from app.ai.explanation_catalog import EXPLANATION_CATALOG
 
 
 @dataclass(frozen=True)
@@ -28,74 +29,51 @@ class GroundedExplanation:
 
 
 def explain_case(case: AssuranceCase) -> GroundedExplanation:
-    """Produce a deterministic, evidence-bounded explanation.
-
-    This is the M5 provider boundary: a hosted LLM can replace this function
-    later, but it must preserve the same structured output and evidence IDs.
-    """
+    """Produce a deterministic, evidence-bounded explanation."""
     exposure = f"Rs {case.exposure_inr:,.0f}"
-    violation = case.violation_type.value if case.violation_type else ""
     
-    if violation == "DUPLICATE_COLLECTION":
+    # 1. Fetch catalog semantics
+    v_type = case.violation_type
+    if v_type not in EXPLANATION_CATALOG:
+        # Extreme fallback if a new enum was added but not to the catalog
+        action = case.recommended_action.value if case.recommended_action else "ESCALATE"
         return GroundedExplanation(
             provider="grounded-deterministic-v1",
-            summary=(
-                "The same order resulted in more than one successful collection."
-            ),
-            root_cause=(
-                "The original payment later completed after an automated retry had "
-                "already captured successfully."
-            ),
-            why_flagged=(
-                "Multiple successful captures were associated with the same financial intent."
-            ),
-            recommendation=(
-                "Refund the duplicate collection."
-            ),
+            summary=case.violation_description or "Anomalous event sequence detected.",
+            root_cause=f"The deterministic invariant for {v_type.value if v_type else 'anomalous behavior'} was breached.",
+            why_flagged="The reconstructed state machine did not match the required invariants.",
+            recommendation=f"Recommended action: {action}.",
             confidence=case.confidence,
             evidence_event_ids=case.evidence_event_ids,
         )
         
-    if violation == "LATE_EVIDENCE":
-        return GroundedExplanation(
-            provider="grounded-deterministic-v1",
-            summary="Required dispute evidence was submitted after the allowed deadline.",
-            root_cause="The dispute workflow did not receive the required evidence within the permitted submission window.",
-            why_flagged="The evidence submission timestamp exceeded the dispute deadline.",
-            recommendation="Escalate for review.",
-            confidence=case.confidence,
-            evidence_event_ids=case.evidence_event_ids,
-        )
-        
-    if violation == "REFUND_FAILURE":
-        return GroundedExplanation(
-            provider="grounded-deterministic-v1",
-            summary="The refund was requested but the provider reported that the refund failed.",
-            root_cause="The recovery action did not complete successfully at the provider.",
-            why_flagged="The requested refund has no confirmed successful completion event.",
-            recommendation="Retry or escalate the refund.",
-            confidence=case.confidence,
-            evidence_event_ids=case.evidence_event_ids,
-        )
-        
-    if violation == "SETTLEMENT_VARIANCE":
-        return GroundedExplanation(
-            provider="grounded-deterministic-v1",
-            summary="The settlement amount does not match the amount expected from the captured payment activity.",
-            root_cause="The settlement reconciliation produced an unexplained amount difference.",
-            why_flagged="The provider settlement amount differs from the reconstructed expected amount.",
-            recommendation="Investigate settlement discrepancy.",
-            confidence=case.confidence,
-            evidence_event_ids=case.evidence_event_ids,
-        )
+    template = EXPLANATION_CATALOG[v_type]
+    summary = template["what_happened"]
+    root_cause = template["root_cause"]
+    why_flagged = template["why_flagged"]
+    
+    # 2. Data Grounding (Interpolation)
+    # E.g. for REFUND_SLA_BREACH, check if there's a REFUND_FAILED in the evidence/timeline
+    if v_type == ViolationType.REFUND_SLA_BREACH:
+        failed = [s for s in case.causal_chain if s.event_type == "payment.refund_failed"]
+        completed = [s for s in case.causal_chain if s.event_type in ("payment.refund_completed", "payment.refund_processed")]
+        if failed:
+            root_cause += " Specifically, a refund failure event was detected."
+        elif completed:
+            root_cause += " Specifically, the refund eventually completed, but after the allowed deadline."
+            
+    # Can expand grounding logic here safely for other violations
+    # For now, append exposure logic if applicable
+    if case.financial_exposure and case.financial_exposure > 0:
+        why_flagged += f" A monetary exposure of {exposure} was calculated."
 
-    # Fallback for others
     action = case.recommended_action.value if case.recommended_action else "ESCALATE"
+    
     return GroundedExplanation(
         provider="grounded-deterministic-v1",
-        summary=case.violation_description or "Anomalous event sequence detected.",
-        root_cause=f"The deterministic invariant for {violation if violation else 'anomalous behavior'} was breached.",
-        why_flagged="The reconstructed state machine did not match the required invariants.",
+        summary=summary,
+        root_cause=root_cause,
+        why_flagged=why_flagged,
         recommendation=f"Recommended action: {action}.",
         confidence=case.confidence,
         evidence_event_ids=case.evidence_event_ids,
