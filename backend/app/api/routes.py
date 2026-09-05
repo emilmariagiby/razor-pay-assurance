@@ -136,7 +136,15 @@ async def razorpay_webhook(request: Request, db: Session = Depends(get_db)):
                 }
                 
                 # 3. Attempt verification (enforces expected == observed)
-                is_verified = case.attempt_verification(expected_state, observed_state, outcome_payload)
+                is_verified = case.attempt_verification(
+                    expected_state, 
+                    observed_state, 
+                    outcome_payload,
+                    provenance_source="razorpay_webhook",
+                    provenance_record_id=event.event_id,
+                    provenance_evidence_ids=[event.payment_id, event.refund_id] if getattr(event, 'refund_id', None) else [event.payment_id],
+                    provenance_model_version="v1"
+                )
                 if is_verified:
                     memory.mark_resolved(case, RecommendedAction.REFUND_DUPLICATE.value)
                 cases = [case]
@@ -646,14 +654,26 @@ def action_refund(case_id: str, body: ActionRequest, db: Session = Depends(get_d
         case.exposure_details["relevant_event_ids"] = exposure.relevant_event_ids or ["sim_evt_1"]
         
         # 3. Attempt Verification
-        is_verified = case.attempt_verification(expected_state, observed_state, outcome_payload)
+        is_verified = case.attempt_verification(
+            expected_state, 
+            observed_state, 
+            outcome_payload,
+            provenance_source="simulated_environment",
+            provenance_record_id=f"sim_{refund_id}",
+            provenance_evidence_ids=[payment_id, refund_id],
+            provenance_model_version="v1"
+        )
         if is_verified:
             memory.mark_resolved(case, RecommendedAction.REFUND_DUPLICATE.value)
     else:
         case.attempt_verification(
             {"action": "refund", "status": "completed"}, 
             {"action": "refund", "status": "failed"}, 
-            {"refund_id": refund_id, "verification": "EXPOSURE_REMAINS"}
+            {"refund_id": refund_id, "verification": "EXPOSURE_REMAINS"},
+            provenance_source="simulated_environment",
+            provenance_record_id=f"sim_fail_{refund_id}",
+            provenance_evidence_ids=[refund_id],
+            provenance_model_version="v1"
         )
 
     repo.save_case(case, stream.order_id)

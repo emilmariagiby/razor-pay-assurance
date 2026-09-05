@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Iterable
 
-from app.cases.assurance import AssuranceCase
+from app.cases.assurance import AssuranceCase, AssuranceCaseStatus
 from app.models.event import EventStream, EventType
 
 
@@ -84,7 +84,17 @@ class OutcomeMemory:
         self.risk_model = KnownActionRiskModel()
         self.anomaly_detector = UnknownPatternDetector()
 
-    def record(self, case: AssuranceCase, stream: EventStream) -> OutcomeRecord:
+    def record(self, case: AssuranceCase, stream: EventStream) -> OutcomeRecord | None:
+        # STRICT LEARNING PROVENANCE (No proof -> no learning)
+        if case.status != AssuranceCaseStatus.ASSURED:
+            return None
+        
+        if not case.outcome_verified:
+            return None
+            
+        if not case.provenance_source or not case.provenance_record_id or not case.provenance_evidence_ids:
+            return None
+
         record = OutcomeRecord(
             case_id=case.case_id,
             features=extract_features(case, stream),
@@ -93,6 +103,11 @@ class OutcomeMemory:
             recommended_action=case.recommended_action.value if case.recommended_action else None,
             final_status=case.status.value if case.status else None,
             financial_exposure=case.financial_exposure,
+            outcome_verified=case.outcome_verified,
+            source_type=case.provenance_source,
+            source_record_id=case.provenance_record_id,
+            verification_evidence_ids=case.provenance_evidence_ids,
+            model_version=case.provenance_model_version or "v1",
             recorded_at=datetime.now(timezone.utc)
         )
         if self.repository:

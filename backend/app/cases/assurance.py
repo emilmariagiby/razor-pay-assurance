@@ -173,6 +173,12 @@ class AssuranceCase:
     outcome_verified: bool = False
     outcome_details:  dict = field(default_factory=dict)
 
+    # Provenance Tracking (Priority 3)
+    provenance_source: str = ""
+    provenance_record_id: str = ""
+    provenance_evidence_ids: list[str] = field(default_factory=list)
+    provenance_model_version: str = ""
+
     def approve_recommendation(self, note: str = "") -> None:
         """Human approves the recommended action — moves to RESOLVING."""
         self.status = AssuranceCaseStatus.RESOLVING
@@ -196,7 +202,16 @@ class AssuranceCase:
         # For a basic exact match of the dictionaries:
         return expected == observed
 
-    def attempt_verification(self, expected: dict, observed: dict, outcome: dict | None = None) -> bool:
+    def attempt_verification(
+        self, 
+        expected: dict, 
+        observed: dict, 
+        outcome: dict | None = None,
+        provenance_source: str = "",
+        provenance_record_id: str = "",
+        provenance_evidence_ids: list[str] | None = None,
+        provenance_model_version: str = ""
+    ) -> bool:
         """
         Attempts to mark this case as ASSURED by formally comparing
         the expected financial state against the observed provider state.
@@ -206,6 +221,13 @@ class AssuranceCase:
             self.status = AssuranceCaseStatus.ASSURED
             self.resolved_at = datetime.now(timezone.utc)
             self.outcome_verified = True
+            
+            # Lock in provenance upon successful verification
+            self.provenance_source = provenance_source
+            self.provenance_record_id = provenance_record_id
+            self.provenance_evidence_ids = provenance_evidence_ids or []
+            self.provenance_model_version = provenance_model_version
+            
             if outcome:
                 self.outcome_details = outcome
             return True
@@ -256,6 +278,10 @@ class AssuranceCase:
             "resolution_note":      self.resolution_note,
             "outcome_verified":     self.outcome_verified,
             "outcome_details":      self.outcome_details,
+            "provenance_source":    self.provenance_source,
+            "provenance_record_id": self.provenance_record_id,
+            "provenance_evidence_ids": self.provenance_evidence_ids,
+            "provenance_model_version": self.provenance_model_version,
         }
 
     def __repr__(self) -> str:
