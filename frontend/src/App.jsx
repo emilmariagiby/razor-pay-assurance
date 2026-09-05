@@ -13,7 +13,13 @@ const title = (value = '') => value.replaceAll('_', ' ')
 const fetchJson = async (url, options) => {
   const response = await fetch(url, options)
   const payload = await response.json().catch(() => ({}))
-  if (!response.ok) throw new Error(`${response.status} ${response.statusText}: ${payload.detail || url}`)
+  if (!response.ok) {
+    const detail = payload.detail
+    const msg = Array.isArray(detail)
+      ? detail.map(e => `${e.loc?.slice(-1)[0] ?? ''}: ${e.msg}`).join('; ')
+      : (typeof detail === 'string' ? detail : JSON.stringify(detail) || url)
+    throw new Error(`${response.status} ${response.statusText}: ${msg}`)
+  }
   return payload
 }
 
@@ -171,14 +177,21 @@ function App() {
     } catch (actionError) { setError(actionError.message) } finally { setActing(false) }
   }
 
-  const [customCasePayload, setCustomCasePayload] = useState('{\n  "name": "Agent retry after cancellation",\n  "amount_inr": 25000,\n  "events": [\n    {"event_type": "payment.created", "payment_id": "pay_1", "amount": 2500000, "timestamp": "2026-09-02T10:00:00Z", "source": "gateway"},\n    {"event_type": "payment.authorized", "payment_id": "pay_1", "amount": 2500000, "timestamp": "2026-09-02T10:01:00Z", "source": "gateway"},\n    {"event_type": "payment.cancelled", "payment_id": "pay_1", "amount": 2500000, "timestamp": "2026-09-02T10:02:00Z", "source": "gateway"},\n    {"event_type": "agent.retry_initiated", "payment_id": "pay_2", "amount": 2500000, "timestamp": "2026-09-02T10:03:00Z", "source": "agent"},\n    {"event_type": "payment.captured", "payment_id": "pay_2", "amount": 2500000, "timestamp": "2026-09-02T10:04:00Z", "source": "gateway"}\n  ]\n}')
+  const [customCasePayload, setCustomCasePayload] = useState('{\n  "name": "Duplicate collection — late authorization",\n  "amount_inr": 25000,\n  "order_id": "ord_demo_custom",\n  "events": [\n    {"event_type": "payment.created",    "payment_id": "pay_A", "amount": 2500000, "timestamp": "2026-09-02T10:00:00Z", "source": "gateway"},\n    {"event_type": "payment.timeout",    "payment_id": "pay_A",                      "timestamp": "2026-09-02T10:00:05Z", "source": "gateway"},\n    {"event_type": "agent.retry_initiated", "payment_id": "pay_A",                  "timestamp": "2026-09-02T10:00:30Z", "source": "agent"},\n    {"event_type": "payment.created",    "payment_id": "pay_B", "amount": 2500000, "timestamp": "2026-09-02T10:00:34Z", "source": "agent"},\n    {"event_type": "payment.authorized", "payment_id": "pay_B", "amount": 2500000, "timestamp": "2026-09-02T10:00:36Z", "source": "bank"},\n    {"event_type": "payment.captured",   "payment_id": "pay_B", "amount": 2500000, "timestamp": "2026-09-02T10:00:37Z", "source": "gateway"},\n    {"event_type": "payment.authorized", "payment_id": "pay_A", "amount": 2500000, "timestamp": "2026-09-02T10:04:12Z", "source": "bank"},\n    {"event_type": "payment.captured",   "payment_id": "pay_A", "amount": 2500000, "timestamp": "2026-09-02T10:04:13Z", "source": "gateway"}\n  ]\n}')
 
   async function submitCustomCase(e) {
     e.preventDefault()
     setActing(true)
     setError('')
+    let payload
     try {
-      const payload = JSON.parse(customCasePayload)
+      payload = JSON.parse(customCasePayload)
+    } catch (parseErr) {
+      setError(`Invalid JSON: ${parseErr.message}`)
+      setActing(false)
+      return
+    }
+    try {
       const result = await fetchJson(`${API}/assurance/cases`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
