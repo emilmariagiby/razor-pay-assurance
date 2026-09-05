@@ -65,7 +65,7 @@ function App() {
   const [learningStatus, setLearningStatus] = useState(null)
   const [leftView, setLeftView] = useState('graph')
   const [classifyMode, setClassifyMode] = useState(false)
-  const [classification, setClassification] = useState({ violation_type: 'COLLECTION_AFTER_CANCELLATION', reason: '', recommended_action: 'REFUND_DUPLICATE' })
+  const [classification, setClassification] = useState({ violation_type: '', reason: '', recommended_action: '' })
   const hasLoadedCase = useRef(false)
 
   async function refreshMetrics() {
@@ -171,7 +171,7 @@ function App() {
     } catch (actionError) { setError(actionError.message) } finally { setActing(false) }
   }
 
-  const [customCasePayload, setCustomCasePayload] = useState('{\n  "name": "Agent retry after cancellation",\n  "amount_inr": 25000,\n  "events": [\n    {"event_type": "payment.created", "payment_id": "pay_1", "amount_inr": 25000, "timestamp": "2026-09-02T10:00:00Z", "source": "gateway"},\n    {"event_type": "payment.authorized", "payment_id": "pay_1", "amount_inr": 25000, "timestamp": "2026-09-02T10:01:00Z", "source": "gateway"},\n    {"event_type": "payment.cancelled", "payment_id": "pay_1", "amount_inr": 25000, "timestamp": "2026-09-02T10:02:00Z", "source": "gateway"},\n    {"event_type": "agent.retry_initiated", "payment_id": "pay_2", "amount_inr": 25000, "timestamp": "2026-09-02T10:03:00Z", "source": "agent"},\n    {"event_type": "payment.captured", "payment_id": "pay_2", "amount_inr": 25000, "timestamp": "2026-09-02T10:04:00Z", "source": "gateway"}\n  ]\n}')
+  const [customCasePayload, setCustomCasePayload] = useState('{\n  "name": "Agent retry after cancellation",\n  "amount_inr": 25000,\n  "events": [\n    {"event_type": "payment.created", "payment_id": "pay_1", "amount": 2500000, "timestamp": "2026-09-02T10:00:00Z", "source": "gateway"},\n    {"event_type": "payment.authorized", "payment_id": "pay_1", "amount": 2500000, "timestamp": "2026-09-02T10:01:00Z", "source": "gateway"},\n    {"event_type": "payment.cancelled", "payment_id": "pay_1", "amount": 2500000, "timestamp": "2026-09-02T10:02:00Z", "source": "gateway"},\n    {"event_type": "agent.retry_initiated", "payment_id": "pay_2", "amount": 2500000, "timestamp": "2026-09-02T10:03:00Z", "source": "agent"},\n    {"event_type": "payment.captured", "payment_id": "pay_2", "amount": 2500000, "timestamp": "2026-09-02T10:04:00Z", "source": "gateway"}\n  ]\n}')
 
   async function submitCustomCase(e) {
     e.preventDefault()
@@ -186,10 +186,24 @@ function App() {
       })
       setAddCaseDrawerOpen(false)
       
-      const newCase = result.cases[0]
+      const newCase = result.cases && result.cases.length > 0 ? result.cases[0] : { case_id: 'C-NO-ISSUE', status: 'ASSURED', severity: 'NORMAL', financial_exposure: 0, violation_type: 'NO_VIOLATION', workflow: 'VERIFIED' }
       setScenarioName('custom_case')
       setLeftView('graph')
       setCaseData(newCase)
+      
+      if (newCase.case_id !== 'C-NO-ISSUE') {
+         setPendingCases(prev => [{ name: payload.name || newCase.case_id, severity: newCase.severity || 'HIGH', created_at: new Date().toISOString(), isOld: false, isCustom: true }, ...prev])
+      }
+      
+      if (newCase.case_id === 'C-NO-ISSUE') {
+         setTimeline([])
+         setGraph({ nodes: [], edges: [] })
+         setExplanation(null)
+         setAudit([])
+         setRisk(null)
+         setRecommendation(null)
+         return
+      }
       
       const responses = await Promise.all(['timeline', 'graph', 'explanation', 'audit', 'risk', 'recommendation'].map((resource) => fetchJson(`${API}/assurance/cases/${newCase.case_id}/${resource}`)))
       setTimeline(responses[0].steps || [])
@@ -202,6 +216,7 @@ function App() {
       
     } catch (err) {
       setError(`Failed to submit case: ${err.message}`)
+    } finally {
       setActing(false)
     }
   }
@@ -402,7 +417,7 @@ function App() {
             <span className={`status status-${(caseData?.status || 'OPEN').toLowerCase()}`}>{caseData?.status || 'OPEN'}</span>
             <span className="severity">{caseData?.severity || 'NORMAL'}</span>
           </div>
-          <h2>{isUnknown ? 'UNKNOWN PATTERN DETECTED' : title(caseData?.violation_type)}</h2>
+          <h2>{isNoViolation ? 'NO DETERMINISTIC VIOLATION' : (isUnknown ? 'UNKNOWN PATTERN DETECTED' : title(caseData?.violation_type))}</h2>
         </div>
         <div className="header-metrics">
           <div><span>EXPOSURE</span><strong>{money(caseData?.financial_exposure)}</strong></div>
@@ -417,8 +432,8 @@ function App() {
           {isNoViolation ? (
              <div className="no-violation-msg">
                 <ShieldCheck size={40} />
-                <h3>NO VIOLATIONS DETECTED</h3>
-                <p>The financial event stream matched all invariant rules and learned patterns.</p>
+                <h3>NO DETERMINISTIC VIOLATION</h3>
+                <p>No supported financial invariant was breached by this event sequence.</p>
              </div>
           ) : (
             <div className="panel left-panel-container">
@@ -474,7 +489,7 @@ function App() {
 
           <div className="explanation-section">
             <span className="eyebrow">FINANCIAL IMPACT</span>
-            {caseData?.exposure_details?.financially_applicable === false ? (
+            {caseData?.exposure_details?.financially_applicable === false || caseData?.financial_exposure == null ? (
                <div className="impact-box"><p style={{margin: '10px 0', fontSize: '13px', color: '#888'}}>No monetary exposure established</p></div>
             ) : (
                <div className="impact-box">
@@ -493,7 +508,7 @@ function App() {
                 <span className={`value ${caseData?.risk_assessment?.is_anomaly ? 'anomaly' : ''}`}>
                   {caseData?.risk_assessment?.risk_score != null 
                      ? `${Math.round(caseData.risk_assessment.risk_score * 100)}%` 
-                     : 'Unavailable'}
+                     : 'ML signal unavailable'}
                 </span>
               </div>
               <div className="score-sub">
@@ -501,7 +516,7 @@ function App() {
                 <span className="value">
                   {caseData?.risk_assessment?.external_behavior_signal != null 
                      ? `${Math.round(caseData.risk_assessment.external_behavior_signal * 100)}%` 
-                     : 'Unavailable'}
+                     : 'ML signal unavailable'}
                 </span>
               </div>
             </div>
@@ -547,7 +562,7 @@ function App() {
                 </form>
               ) : (
                 <>
-                  <p className="recommended-action-text">INVESTIGATE (Unknown Pattern)</p>
+                  <p className="recommended-action-text" style={{whiteSpace: 'normal', wordWrap: 'break-word'}}>INVESTIGATE (Unknown Pattern)</p>
                   <button className="primary-action-btn" onClick={() => setClassifyMode(true)}>
                     Classify Case <ArrowUpRight size={17} />
                   </button>
@@ -555,7 +570,7 @@ function App() {
               )
             ) : (
               <>
-                <p className="recommended-action-text">{isAssured || isNoViolation ? 'Case resolved successfully.' : (caseData?.recommended_action ? title(caseData.recommended_action) : 'NO ACTION')}</p>
+                <p className="recommended-action-text" style={{whiteSpace: 'normal', wordWrap: 'break-word'}}>{isAssured || isNoViolation ? 'Case resolved successfully.' : (caseData?.recommended_action ? title(caseData.recommended_action) : 'NO ACTION')}</p>
                 {!isAssured && !isNoViolation && caseData?.recommended_action && caseData.recommended_action !== 'NO_ACTION' && (
                   <button className="primary-action-btn" onClick={approveAction} disabled={acting}>
                     {acting ? 'Verifying...' : 'Approve Action'} <ArrowUpRight size={17} />
@@ -588,7 +603,7 @@ function GraphView({ caseData, graph, nodes, edges, timeline }) {
     <div className="graph-legend"><span>LEGEND:</span><i className="legend-triggered" /> triggered by <i className="legend-preceded" /> preceded by <i className="legend-resolved" /> resolved by <i className="legend-contributes" /> contributes to</div>
     <div className="graph-canvas">
       <div className="lane lane-a"><strong>{workflow.toUpperCase()} WORKFLOW</strong><span>{caseData?.order_id || 'Order stream'}</span></div>
-      <div className="lane lane-b"><strong>{caseData?.violation_type ? title(caseData.violation_type) : 'UNKNOWN PATTERN'}</strong><span>Detected outcome</span></div>
+      <div className="lane lane-b"><strong>{caseData?.violation_type === 'NO_VIOLATION' ? 'NO VIOLATION' : (caseData?.violation_type ? title(caseData.violation_type) : 'UNKNOWN PATTERN')}</strong><span>Detected outcome</span></div>
       <ReactFlow key={`${graph.nodes.length}-${graph.edges.length}`} nodes={nodes} edges={edges} fitView fitViewOptions={{ padding: .12 }} nodesDraggable={false} style={{ width: '100%', height: '100%' }}><Background color="#18383b" gap={24} /><Controls /></ReactFlow>
       <div className="graph-summary"><strong>SUMMARY</strong><span><b className="summary-green">{new Set((graph.nodes || []).map((node) => node.payment_id).filter(Boolean)).size}</b> Payments</span><span><b className="summary-mint">{graph.nodes.length}</b> Events</span><span><b className="summary-green">→ {triggered}</b> Triggered</span><span><b className="summary-blue">→ {preceded}</b> Preceded</span><span><b className="summary-amber">→ {resolved}</b> Resolved</span><span><b className="summary-red">→ {graph.nodes.filter((node) => node.is_violation_root).length}</b> Violations</span></div>
     </div>

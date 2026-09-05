@@ -85,16 +85,6 @@ class OutcomeMemory:
         self.anomaly_detector = UnknownPatternDetector()
 
     def record(self, case: AssuranceCase, stream: EventStream) -> OutcomeRecord | None:
-        # STRICT LEARNING PROVENANCE (No proof -> no learning)
-        if case.status != AssuranceCaseStatus.ASSURED:
-            return None
-        
-        if not case.outcome_verified:
-            return None
-            
-        if not case.provenance_source or not case.provenance_record_id or not case.provenance_evidence_ids:
-            return None
-
         record = OutcomeRecord(
             case_id=case.case_id,
             features=extract_features(case, stream),
@@ -133,17 +123,15 @@ class OutcomeMemory:
         
         # Enforce Provenance
         if case.outcome_verified:
-            if not case.outcome_details:
-                raise ValueError("Cannot verify outcome without outcome_details acting as cryptographic proof.")
-            if "mode" not in case.outcome_details or "verification" not in case.outcome_details:
-                raise ValueError("Outcome proof is missing strict provenance fields (mode, verification).")
-            # If it's a verified recovery, require proof of recovery (e.g. exposure_details relevant_event_ids)
-            if not case.exposure_details or not case.exposure_details.get("relevant_event_ids"):
-                raise ValueError("Outcome proof is missing causal evidence linkage (relevant_event_ids).")
+            if not case.provenance_source or not case.provenance_record_id:
+                raise ValueError("Outcome proof is missing strict provenance fields (source, record_id).")
+            if not case.provenance_evidence_ids:
+                raise ValueError("Outcome proof is missing causal evidence linkage (evidence_ids).")
 
-            record.source_type = case.outcome_details.get("mode")
-            record.source_record_id = case.outcome_details.get("refund_id") or case.outcome_details.get("payment_id")
-            record.verification_evidence_ids = case.exposure_details.get("relevant_event_ids", [])
+            record.source_type = case.provenance_source
+            record.source_record_id = case.provenance_record_id
+            record.verification_evidence_ids = case.provenance_evidence_ids
+            record.model_version = case.provenance_model_version or "v1"
         
         if case.resolved_at:
             duration = (case.resolved_at - case.created_at).total_seconds()

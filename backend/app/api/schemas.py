@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Optional
 from pydantic import BaseModel, Field
 
-from app.models.event import EventStream
+from app.models.event import EventStream, FinancialEvent
 
 
 class AnalyzeRequest(BaseModel):
@@ -30,7 +30,7 @@ class ActionResponse(BaseModel):
 class CreateCaseRequest(BaseModel):
     name: str
     amount_inr: float
-    events: list[dict[str, Any]]
+    events: list[FinancialEvent]
     order_id: Optional[str] = None
     currency: str = "INR"
 

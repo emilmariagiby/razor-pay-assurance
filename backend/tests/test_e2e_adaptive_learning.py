@@ -26,6 +26,7 @@ def test_clean_observation_persisted_correctly(db):
     # Submit a clean stream (no violations)
     clean_request = CreateCaseRequest(
         name="Test Clean",
+        order_id="ord_clean_test",
         amount_inr=1000,
         events=[
             {"event_type": "payment.created", "payment_id": "pay_clean", "amount_inr": 1000, "source": "gateway", "timestamp": "2026-09-02T10:00:00Z"},
@@ -34,20 +35,12 @@ def test_clean_observation_persisted_correctly(db):
         ]
     )
     
-    response = create_custom_case(clean_request, db)
-    
-    # Since it's clean, engine investigates -> []
-    # But routes.py analyze() will create a pseudo case for output... 
-    # Wait, create_custom_case handles empty cases differently: it creates an UNKNOWN case!
-    # Ah! create_custom_case creates an UNKNOWN case if `not cases`.
-    # Let's test standard analyze instead.
     from app.api.routes import analyze, AnalyzeRequest
-    from app.models.event import EventStream, FinancialEvent
+    from app.models.event import EventStream
     
-    events = [FinancialEvent(**e) for e in clean_request.events]
-    stream = EventStream(events=events, order_id="ord_clean_test")
-    
+    stream = EventStream(events=clean_request.events, order_id="ord_clean_test")
     analyze_response = analyze(AnalyzeRequest(stream=stream), db)
+    
     assert len(analyze_response.cases) == 0
     
     # Now check if VerifiedCleanObservationModel has it

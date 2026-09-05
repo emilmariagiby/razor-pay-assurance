@@ -240,37 +240,12 @@ def create_custom_case(request: CreateCaseRequest, db: Session = Depends(get_db)
     memory = OutcomeMemory(repo)
     
     # 1. Parse stream
-    events = [FinancialEvent(**e) for e in request.events]
-    stream = EventStream(events=events, order_id=request.order_id or f"ord_custom_{uuid.uuid4().hex[:6]}")
+    stream = EventStream(events=request.events, order_id=request.order_id or f"ord_custom_{uuid.uuid4().hex[:6]}")
     
     # 2. Run canonical deterministic engine
     cases = _engine.investigate(stream)
     
-    # 3. Handle unknown pattern
-    if not cases:
-        # Create an UNKNOWN case
-        seq, h = get_canonical_hash(stream)
-        case = AssuranceCase(
-            workflow="custom",
-            pattern_status=PatternStatus.UNKNOWN,
-            pattern_hash=h,
-            severity="MEDIUM",
-            violation_description="Custom stream submitted. Awaiting classification.",
-            financial_exposure=int(request.amount_inr * 100),
-            order_id=stream.order_id,
-            status=AssuranceCaseStatus.OPEN
-        )
-        
-        # Check Pattern Memory for a historical match
-        pattern_record = repo.get_pattern_record(h)
-        if pattern_record:
-            case.pattern_status = PatternStatus.MATCHED
-            case.violation_type = ViolationType(pattern_record["classified_violation"])
-            case.violation_description = f"Historical Pattern Match: recognized verified pattern"
-            # Memory and risk layers will handle the recommendation retrieval automatically
-        
-        cases = [case]
-        
+    # 3. Save stream and return
     repo.save_stream(stream)
     for case in cases:
         repo.save_case(case, stream.order_id)
